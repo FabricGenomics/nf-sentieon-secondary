@@ -1,28 +1,64 @@
 name: Build and Push Docker Images to ECR
 
 on:
-  push:
-    branches:
-      - main
-    tags:
-      - '*'
   workflow_dispatch:
+    inputs:
+      aws_env:
+        description: 'Choose the environment to build for'
+        type: choice
+        required: true
+        options:
+          - dev
+          - test
+          - prod
+      git_ref:
+        description: 'Git ref to build from'
+        required: false
+        default: "main"
 
-env:
-  AWS_REGION: us-west-2
-  ECR_REGISTRY: 112118296049.dkr.ecr.us-west-2.amazonaws.com
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
+  set-env:
+    name: Set Environment Configuration
+    runs-on: ubuntu-latest
+    outputs:
+      aws-region: ${{ steps.env-config.outputs.aws-region }}
+      aws-account: ${{ steps.env-config.outputs.aws-account }}
+    steps:
+      - name: Set AWS configuration
+        id: env-config
+        run: |
+          case "${{ inputs.aws_env }}" in
+            dev)
+              echo "aws-region=us-east-1" >> $GITHUB_OUTPUT
+              echo "aws-account=967282559097" >> $GITHUB_OUTPUT
+              ;;
+            test)
+              echo "aws-region=us-west-2" >> $GITHUB_OUTPUT
+              echo "aws-account=266324747922" >> $GITHUB_OUTPUT
+              ;;
+            prod)
+              echo "aws-region=us-west-2" >> $GITHUB_OUTPUT
+              echo "aws-account=112118296049" >> $GITHUB_OUTPUT
+              ;;
+          esac
+
   build-delly:
+    needs: set-env
     name: Build and Push delly
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: ${{ needs.set-env.outputs.aws-region }}
+      AWS_ACCOUNT: ${{ needs.set-env.outputs.aws-account }}
+      ECR_REPOSITORY: nf-secondary-delly
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -31,25 +67,28 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-ecr-push
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/GitHubRunner-role
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Get Short SHA
+        id: short-sha
+        run: echo "short-sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Determine image tag
         id: image-tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${{ inputs.git_ref }}" =~ ^v?[0-9]+\.[0-9]+ ]] || [[ "${{ inputs.git_ref }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Looks like a tag
+            TAG="${{ inputs.git_ref }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
-            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-            TAG="${BRANCH}-${SHORT_SHA}"
+            # Treat as branch
+            TAG="${{ inputs.git_ref }}-${{ steps.short-sha.outputs.short-sha }}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
 
       - name: Build and push delly
         uses: docker/build-push-action@v5
@@ -57,21 +96,24 @@ jobs:
           context: .
           file: docker_files/delly.Dockerfile
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/nf-secondary-delly:${{ steps.image-tag.outputs.tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
   build-jasmine:
+    needs: set-env
     name: Build and Push jasmine
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: ${{ needs.set-env.outputs.aws-region }}
+      AWS_ACCOUNT: ${{ needs.set-env.outputs.aws-account }}
+      ECR_REPOSITORY: nf-secondary-jasmine
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -80,25 +122,28 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-ecr-push
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/GitHubRunner-role
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Get Short SHA
+        id: short-sha
+        run: echo "short-sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Determine image tag
         id: image-tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${{ inputs.git_ref }}" =~ ^v?[0-9]+\.[0-9]+ ]] || [[ "${{ inputs.git_ref }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Looks like a tag
+            TAG="${{ inputs.git_ref }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
-            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-            TAG="${BRANCH}-${SHORT_SHA}"
+            # Treat as branch
+            TAG="${{ inputs.git_ref }}-${{ steps.short-sha.outputs.short-sha }}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
 
       - name: Build and push jasmine
         uses: docker/build-push-action@v5
@@ -106,21 +151,24 @@ jobs:
           context: .
           file: docker_files/jasmine.Dockerfile
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/nf-secondary-jasmine:${{ steps.image-tag.outputs.tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
   build-manta:
+    needs: set-env
     name: Build and Push manta
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: ${{ needs.set-env.outputs.aws-region }}
+      AWS_ACCOUNT: ${{ needs.set-env.outputs.aws-account }}
+      ECR_REPOSITORY: nf-secondary-manta
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -129,25 +177,28 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-ecr-push
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/GitHubRunner-role
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Get Short SHA
+        id: short-sha
+        run: echo "short-sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Determine image tag
         id: image-tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${{ inputs.git_ref }}" =~ ^v?[0-9]+\.[0-9]+ ]] || [[ "${{ inputs.git_ref }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Looks like a tag
+            TAG="${{ inputs.git_ref }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
-            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-            TAG="${BRANCH}-${SHORT_SHA}"
+            # Treat as branch
+            TAG="${{ inputs.git_ref }}-${{ steps.short-sha.outputs.short-sha }}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
 
       - name: Build and push manta
         uses: docker/build-push-action@v5
@@ -155,21 +206,24 @@ jobs:
           context: .
           file: docker_files/manta.Dockerfile
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/nf-secondary-manta:${{ steps.image-tag.outputs.tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
   build-svcalling-pipeline:
+    needs: set-env
     name: Build and Push svcalling-pipeline
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: ${{ needs.set-env.outputs.aws-region }}
+      AWS_ACCOUNT: ${{ needs.set-env.outputs.aws-account }}
+      ECR_REPOSITORY: nf-secondary-svcalling-pipeline
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -178,25 +232,28 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-ecr-push
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/GitHubRunner-role
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Get Short SHA
+        id: short-sha
+        run: echo "short-sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Determine image tag
         id: image-tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${{ inputs.git_ref }}" =~ ^v?[0-9]+\.[0-9]+ ]] || [[ "${{ inputs.git_ref }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Looks like a tag
+            TAG="${{ inputs.git_ref }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
-            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-            TAG="${BRANCH}-${SHORT_SHA}"
+            # Treat as branch
+            TAG="${{ inputs.git_ref }}-${{ steps.short-sha.outputs.short-sha }}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
 
       - name: Build and push svcalling-pipeline
         uses: docker/build-push-action@v5
@@ -204,21 +261,24 @@ jobs:
           context: .
           file: docker_files/svcalling-pipeline.Dockerfile
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/nf-secondary-svcalling-pipeline:${{ steps.image-tag.outputs.tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
 
   build-truvari:
+    needs: set-env
     name: Build and Push truvari
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      contents: read
+    env:
+      AWS_REGION: ${{ needs.set-env.outputs.aws-region }}
+      AWS_ACCOUNT: ${{ needs.set-env.outputs.aws-account }}
+      ECR_REPOSITORY: nf-secondary-truvari
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.git_ref }}
           fetch-depth: 0
 
       - name: Set up Docker Buildx
@@ -227,25 +287,28 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
-          role-session-name: github-actions-ecr-push
+          role-to-assume: arn:aws:iam::${{ env.AWS_ACCOUNT }}:role/GitHubRunner-role
 
       - name: Login to Amazon ECR
-        uses: aws-actions/amazon-ecr-login@v2
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v1
+
+      - name: Get Short SHA
+        id: short-sha
+        run: echo "short-sha=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
 
       - name: Determine image tag
         id: image-tag
         run: |
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG="${{ github.ref_name }}"
+          if [[ "${{ inputs.git_ref }}" =~ ^v?[0-9]+\.[0-9]+ ]] || [[ "${{ inputs.git_ref }}" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            # Looks like a tag
+            TAG="${{ inputs.git_ref }}"
           else
-            BRANCH=$(echo "${{ github.ref_name }}" | sed 's/[^a-zA-Z0-9._-]/-/g')
-            SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
-            TAG="${BRANCH}-${SHORT_SHA}"
+            # Treat as branch
+            TAG="${{ inputs.git_ref }}-${{ steps.short-sha.outputs.short-sha }}"
           fi
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
-          echo "Image tag: ${TAG}"
 
       - name: Build and push truvari
         uses: docker/build-push-action@v5
@@ -253,7 +316,7 @@ jobs:
           context: .
           file: docker_files/truvari.Dockerfile
           push: true
-          tags: ${{ env.ECR_REGISTRY }}/nf-secondary-truvari:${{ steps.image-tag.outputs.tag }}
+          tags: ${{ steps.ecr-login.outputs.registry }}/${{ env.ECR_REPOSITORY }}:${{ steps.image-tag.outputs.tag }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false
