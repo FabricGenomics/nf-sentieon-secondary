@@ -1,0 +1,484 @@
+#!/usr/bin/perl
+use strict;
+use warnings;
+use Getopt::Long;
+use JSON;
+
+#-----------------------------------------------------------------------------
+#----------------------------------- MAIN ------------------------------------
+#-----------------------------------------------------------------------------
+my $usage = "
+
+Synopsis:
+
+sentieon-metrics2json --aln_metrics aln_metrics.txt \
+                      --gc_summary  gc_summary.txt  \
+                      --gc_metrics  gc_metrics.txt  \
+                      --mq_metrics  mq_metrics.txt  \
+                      --qd_metrics  qd_metrics.txt  \
+                      --is_metrics  is_metrics.txt  \
+                      --hs_metrics  hs_metrics.txt  \
+                      > sentieon_metrics.json
+
+sentieon-metrics2json --aln_metrics test/aln_metrics.txt --gc_summary test/gc_summary.txt --gc_metrics test/gc_metrics.txt --mq_metrics test/mq_metrics.txt --qd_metrics test/qd_metrics.txt --is_metrics test/is_metrics.txt --hs_metrics test/hs_metrics.txt > sentieon_metrics.json
+
+Description:
+
+This script parses alignment QC metrics produced by Sentieon and
+produces a summary report in JSON format for consumption by the Fabric
+secondary pipeline API.
+
+Options:
+
+  --aln_metrics, -a
+
+    The file created with the Sentieon ALN_METRIC_TXT option.
+  
+  --gc_metrics, -g
+  
+    The file created with the Sentieon GC_METRIC_TXT option.
+
+  --gc_summary, -u
+  
+    The file created with the Sentieon GC_SUMMARY_TXT option.
+
+  --hs_metrics, -h
+  
+    The file created with the Sentieon HS_METRIC_TXT option.
+
+  --is_metrics, -i
+  
+    The file created with the Sentieon IS_METRIC_TXT option.
+
+  --mq_metrics, -m
+  
+    The file created with the Sentieon MQ_METRIC_TXT option.
+
+  --qd_metrics, -q
+
+    The file created with the Sentieon QD_METRIC_TXT option.
+
+";
+
+
+my ($help, $aln_metrics_file, $gc_metrics_file, $gc_summary_file,
+    $hs_metrics_file, $is_metrics_file, $mq_metrics_file,
+    $qd_metrics_file);
+
+my $opt_success = GetOptions('help|h'               => \$help,
+			     'aln_metrics_file|a=s' => \$aln_metrics_file, 
+			     'gc_metrics_file|g=s'  => \$gc_metrics_file,  
+			     'gc_summary_file|u=s'  => \$gc_summary_file,  
+			     'hs_metrics_file|h=s'  => \$hs_metrics_file,  
+			     'is_metrics_file|i=s'  => \$is_metrics_file,  
+			     'mq_metrics_file|m=s'  => \$mq_metrics_file,  
+			     'qd_metrics_file|q=s'  => \$qd_metrics_file,
+    );
+
+die $usage if $help || ! $opt_success;
+
+
+my %data;
+
+aln_metrics($aln_metrics_file, \%data);
+gc_metrics($gc_metrics_file, \%data);
+gc_summary($gc_summary_file, \%data);
+hs_metrics($hs_metrics_file, \%data);
+is_metrics($is_metrics_file, \%data);
+mq_metrics($mq_metrics_file, \%data);
+qd_metrics($qd_metrics_file, \%data);
+
+print_json_stderr(\%data);
+print_json_report(\%data);
+
+#-----------------------------------------------------------------------------
+#-------------------------------- SUBROUTINES --------------------------------
+#-----------------------------------------------------------------------------
+
+sub aln_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : aln_metrics_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # aln_metrics.txt
+    # CATEGORY        TOTAL_READS  PF_READS  PCT_PF_READS  PF_NOISE_READS  PF_READS_ALIGNED  PCT_PF_READS_ALIGNED  PF_ALIGNED_BASES  PF_HQ_ALIGNED_READS  PF_HQ_ALIGNED_BASES  PF_HQ_ALIGNED_Q20_BASES  PF_HQ_MEDIAN_MISMATCHES  PF_MISMATCH_RATE  PF_HQ_ERROR_RATE  PF_INDEL_RATE  MEAN_READ_LENGTH  READS_ALIGNED_IN_PAIRS  PCT_READS_ALIGNED_IN_PAIRS  BAD_CYCLES  STRAND_BALANCE  PCT_CHIMERAS  PCT_ADAPTER
+    # FIRST_OF_PAIR   8471         8471      1.000000      0               8342              0.984772              794686            8189                 783154               732304                   0.000000                 0.006724          0.006520          0.000182       101.000000        5009                    0.600456                    0           0.702589        0.418213      0.002597
+    # SECOND_OF_PAIR  8487         8487      1.000000      0               5130              0.604454              480281            5017                 473385               464442                   0.000000                 0.002495          0.002387          0.000198       101.000000        5009                    0.976413                    0           0.840351        0.677470      0.000000
+    # PAIR            16958        16958     1.000000      0               13472             0.794433              1274967           13206                1256539              1196746                  0.000000                 0.005131          0.004963          0.000188       101.000000        10018                   0.743616                    0           0.755048        0.517169      0.001297
+
+    my @keys;
+  LINE:
+    while (my $line = <$IN>) {
+
+	chomp $line;
+	next LINE unless $line;
+
+	if ($line =~ /^CATEGORY/) {
+	    @keys = split /\t/, $line;
+	    # Get rid of 'CATEGORY'
+	    shift @keys;
+	    next LINE;
+	}
+
+	my @values = split /\t/, $line;
+	my $category = shift @values;
+	my %values_hash;
+	@values_hash{@keys} = @values;
+	$data{aln_metrics}{$category} = \%values_hash;
+    }
+}
+
+#-----------------------------------------------------------------------------
+
+sub gc_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : gc_metrics_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # gc_metrics.txt
+    #  ACCUMULATION_LEVEL  READS_USED  GC  WINDOWS  READ_STARTS  MEAN_BASE_QUALITY  NORMALIZED_COVERAGE  ERROR_BAR_WIDTH  SAMPLE  LIBRARY  READ_GROUP
+    #  All_Reads           ALL         0   785      2            17                 6.588264             4.658606
+    #  All_Reads           ALL         1   1700     0            0                  0.000000             0.000000
+    #  All_Reads           ALL         2   1665     0            0                  0.000000             0.000000
+    #  All_Reads           ALL         3   2291     0            0                  0.000000             0.000000
+    #  All_Reads           ALL         4   3235     0            0                  0.000000             0.000000
+    #  ...
+    #  All_Reads           ALL         95  58       0            0                  0.000000             0.000000
+    #  All_Reads           ALL         96  28       0            0                  0.000000             0.000000
+
+    my @keys;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+	if ($line =~ /^ACCUMULATION_LEVEL/) {
+	    @keys = split /\t/, $line;
+	    next LINE;
+	}
+
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys} = @values;
+	push @{$data{gc_metrics}}, \%values_hash;
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub gc_summary {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : gc_summary_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+    
+    # gc_summary.txt
+    #  ACCUMULATION_LEVEL  READS_USED  WINDOW_SIZE  TOTAL_CLUSTERS  ALIGNED_READS  AT_DROPOUT  GC_DROPOUT  GC_NC_0_19  GC_NC_20_39  GC_NC_40_59  GC_NC_60_79  GC_NC_80_100  SAMPLE  LIBRARY  READ_GROUP
+    #  All_Reads           ALL         100          8481            13494          0.228635    7.690453    1.459417    1.199996     1.023712     0.592526     0.738354
+    
+    my @keys;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+	
+	if ($line =~ /^ACCUMULATION_LEVEL/) {
+	    @keys = split /\t/, $line;
+	    next LINE;
+	}
+	
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys} = @values;
+	$data{gc_summary} = \%values_hash;
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub hs_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : hs_summary_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # hs_metrics.txt
+    #  BAIT_SET                  GENOME_SIZE  BAIT_TERRITORY  TARGET_TERRITORY  BAIT_DESIGN_EFFICIENCY  TOTAL_READS  PF_READS  PF_UNIQUE_READS  PCT_PF_READS  PCT_PF_UQ_READS  PF_UQ_READS_ALIGNED  PCT_PF_UQ_READS_ALIGNED  PF_BASES_ALIGNED  PF_UQ_BASES_ALIGNED  ON_BAIT_BASES  NEAR_BAIT_BASES  OFF_BAIT_BASES  ON_TARGET_BASES  PCT_SELECTED_BASES  PCT_OFF_BAIT  ON_BAIT_VS_SELECTED  MEAN_BAIT_COVERAGE  MEAN_TARGET_COVERAGE  PCT_USABLE_BASES_ON_BAIT  PCT_USABLE_BASES_ON_TARGET  FOLD_ENRICHMENT  ZERO_CVG_TARGETS_PCT  PCT_EXC_DUPE  PCT_EXC_MAPQ  PCT_EXC_BASEQ  PCT_EXC_OVERLAP  PCT_EXC_OFF_TARGET  FOLD_80_BASE_PENALTY  PCT_TARGET_BASES_1X  PCT_TARGET_BASES_2X  PCT_TARGET_BASES_10X  PCT_TARGET_BASES_20X  PCT_TARGET_BASES_30X  PCT_TARGET_BASES_40X  PCT_TARGET_BASES_50X  PCT_TARGET_BASES_100X  HS_LIBRARY_SIZE  HS_PENALTY_10X  HS_PENALTY_20X  HS_PENALTY_30X  HS_PENALTY_40X  HS_PENALTY_50X  HS_PENALTY_100X  AT_DROPOUT  GC_DROPOUT
+    #  Broad.human.exome.b37_22  51304566     682778          682778            1                       16958        16958     16958            1             1                13472                0.794433                 1274967           1274967              32820          117319           1124828         29800            0.117759            0.882241      0.218597             0.0480683           0.0436452             0.0191621                 0.0173988                   1.93427          0.938926              0             0.0144537     0.00164789     0.366319         0.949244            0                     0.023233             0.0148379            0.000153784           0                     0                     0                     0                     0                      0                0               0               0               0               0               0                3.02625     19.8122
+    # 
+    # coverage	count	baseq_count
+    # 0	666915	0
+    # 1	5732	0
+    # 2	8619	0
+    # 3	630	0
+    # 4	604	0
+    # 5	118	117
+    # 197	0	0
+    # 198	0	0
+    # 199	0	0
+    # 200	0	0
+
+    my @keys2;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+	if ($line =~ /^BAIT_SET/) {
+	    my @keys1 = split /\t/, $line;
+	    my $values_line = <$IN>;
+	    my @values = split /\t/, $values_line;
+	    my %values_hash;
+	    @values_hash{@keys1} = @values;
+	    $data{hs_metrics}{summary} = \%values_hash;
+	    next LINE;
+	}
+
+	if ($line =~ /^coverage/){
+	    @keys2 = split /\t/, $line;
+	    next LINE;
+	}
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys2} = @values;
+	push @{$data{hs_metrics}{coverage}}, \%values_hash;
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub is_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : is_summary_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # is_metrics.txt
+    #  MEDIAN_INSERT_SIZE  MEDIAN_ABSOLUTE_DEVIATION  MIN_INSERT_SIZE  MAX_INSERT_SIZE  MEAN_INSERT_SIZE  STANDARD_DEVIATION  READ_PAIRS  PAIR_ORIENTATION  WIDTH_OF_10_PERCENT  WIDTH_OF_20_PERCENT  WIDTH_OF_30_PERCENT  WIDTH_OF_40_PERCENT  WIDTH_OF_50_PERCENT  WIDTH_OF_60_PERCENT  WIDTH_OF_70_PERCENT  WIDTH_OF_80_PERCENT  WIDTH_OF_90_PERCENT  WIDTH_OF_99_PERCENT
+    #  86.000000           10.000000                  20               13197188         82.207668         16.631202           1573        FR                5                    9                    13                   17                   21                   27                   31                   37                   55                   131
+    # 
+    # insert_size	All_Reads.fr_count
+    # 20	3
+    # 21	5
+    # 23	2
+    # 25	1
+    # ...
+    # 109	2
+    # 110	1
+    # 113	1
+
+
+    my @keys2;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+	if ($line =~ /^MEDIAN_INSERT_SIZE/) {
+	    my @keys1 = split /\t/, $line;
+	    my $values_line = <$IN>;
+	    my @values = split /\t/, $values_line;
+	    my %values_hash;
+	    @values_hash{@keys1} = @values;
+	    $data{is_metrics}{summary} = \%values_hash;
+	    next LINE;
+	}
+
+	if ($line =~ /^insert_size/){
+	    @keys2 = split /\t/, $line;
+	    next LINE;
+	}
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys2} = @values;
+	push @{$data{is_metrics}{insert_size}}, \%values_hash;
+	
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub mq_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : mq_summary_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # mq_metrics.txt
+    # CYCLE	MEAN_QUALITY	
+    # 1	31.610436	
+    # 2	31.952308	
+    # 3	32.062212	
+    # 4	35.472553	
+    # 5	35.345060	
+    # ...
+    # 200	22.873571	
+    # 201	22.781077	
+    # 202	20.945092	
+
+    my @keys;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+
+	if ($line =~ /^CYCLE/) {
+	    @keys = split /\t/, $line;
+	    next LINE;
+	}
+
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys} = @values;
+	push @{$data{mq_metrics}}, \%values_hash;
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub qd_metrics {
+
+    my ($file, $data) = @_;
+    die "$usage\n\nFATAL : qd_summary_file_required\n" unless $file;
+    open (my $IN, '<', $file) or
+	die "FATAL : cant_open_file_for_reading : $file\n";
+
+    # qd_metrics.txt
+    # QUALITY	COUNT_OF_Q	
+    # 5	36962	
+    # 6	12357	
+    # 7	93366	
+    # 8	51352	
+    # 9	15914	
+    # 10	50934	
+    # 11	14732	
+    # ...
+    # 40	142029	
+    # 41	266477	
+    
+    my @keys;
+  LINE:
+    while (my $line = <$IN>) {
+	chomp $line;
+	next LINE unless $line;
+
+	if ($line =~ /^QUALITY/) {
+	    @keys = split /\t/, $line;
+	    next LINE;
+	}
+
+	my @values = split /\t/, $line;
+	my %values_hash;
+	@values_hash{@keys} = @values;
+	push @{$data{qd_metrics}}, \%values_hash;
+    }
+    print '';
+}
+
+#-----------------------------------------------------------------------------
+
+sub print_json_stderr {
+
+    my ($data) = @_;
+
+    my $json = JSON->new->allow_nonref;
+    print STDERR $json->pretty->encode( $data );
+}
+
+#-----------------------------------------------------------------------------
+
+sub print_json_report {
+
+    my ($data) = @_;
+
+    my $json = JSON->new->allow_nonref;
+
+    # This function replicated the output produced by:
+    # https://github.com/FabricGenomics/secondary-spiral/blob/master/python/cloud/SentieonMetricsParser.py
+    # I use exactly the same values from the sentieon metrics files
+    # here as are used in the python script above
+
+    # Note https://github.com/FabricGenomics/on_prem_secondary/issues/38
+
+    # Ouptut from SentieonMetricsParser.py provided by Marco
+    # {
+    # "ReportStatus": {
+    #     "code": 0, 
+    #     "logs": []
+    # }, 
+    # "Total Number of reads": 155629, 
+    # "Total Aligned Reads": 155570, 
+    # "Total Q20 Aligned Reads": 134362, 
+    # "% Aligned Reads": 99.9621, 
+    # "Q20 Bases": 13400582, 
+    # "Target Q20 Bases": 7959843, 
+    # "Target Coverage Avg": 27.1553, 
+    # "Target % > 10x": 65.5063, 
+    # "Target % > 20x": 51.0342, 
+    # "Target % > 40x": 26.8778, 
+    # "Q20 Bases %": 86.3748
+    # }
+
+    my $pct_q20_bases;
+    if ($data->{aln_metrics}{PAIR}{PF_ALIGNED_BASES} > 0) {
+	$pct_q20_bases = ($data->{aln_metrics}{PAIR}{PF_HQ_ALIGNED_Q20_BASES} /
+			  $data->{aln_metrics}{PAIR}{PF_ALIGNED_BASES})
+    }
+    else {
+	$pct_q20_bases = 'NAN';
+    }
+    my $pct_hq_reads;
+    if ($data->{aln_metrics}{PAIR}{PF_READS} > 0) {
+	$pct_hq_reads = ($data->{aln_metrics}{PAIR}{PF_HQ_ALIGNED_READS} /
+			 $data->{aln_metrics}{PAIR}{PF_READS})
+    }
+    else {
+	$pct_hq_reads = 'NAN';
+    }
+
+    # PF_READS = Pass Filter Reads (passed Illumina's chastity filter)
+    my %report = ('ReportStatus' => {code => 0, logs => [],},
+		  'Total Number of Reads'   =>  $data->{aln_metrics}{PAIR}{TOTAL_READS},
+		  'Total Aligned Reads'	    =>  $data->{aln_metrics}{PAIR}{PF_READS_ALIGNED},
+		  'Total Q20 Aligned Reads' =>  $data->{aln_metrics}{PAIR}{PF_HQ_ALIGNED_READS},
+		  '% Aligned Reads'	    =>  $data->{aln_metrics}{PAIR}{PCT_PF_READS_ALIGNED},
+		  'Q20 Bases'		    =>  $data->{aln_metrics}{PAIR}{PF_HQ_ALIGNED_BASES},
+		  'Total Bases Aligned'	    =>  $data->{hs_metrics}{summary}{PF_UQ_BASES_ALIGNED},
+		  'On Target Bases'	    =>  $data->{hs_metrics}{summary}{ON_TARGET_BASES},
+		  'Target Q20 Bases'	    =>  $data->{aln_metrics}{PAIR}{PF_HQ_ALIGNED_Q20_BASES},
+		  'Target Coverage Mean'	    =>  $data->{hs_metrics}{summary}{MEAN_TARGET_COVERAGE},
+#		  'Target Coverage Median'	    =>  $data->{hs_metrics}{summary}{MEDIAN_TARGET_COVERAGE},
+ 		  '% of Target with Zero Coverage' =>  $data->{hs_metrics}{summary}{ZERO_CVG_TARGETS_PCT},
+		  'Fold Enrichment' =>  $data->{hs_metrics}{summary}{FOLD_ENRICHMENT},
+		  'Fold 80 Base Penalty' =>  $data->{hs_metrics}{summary}{FOLD_80_BASE_PENALTY},
+		  'Target % > 1x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_1X},
+		  'Target % > 2x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_2X},
+		  'Target % > 10x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_10X},
+		  'Target % > 20x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_20X},
+		  'Target % > 30x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_30X},
+		  'Target % > 40x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_40X},
+		  'Target % > 50x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_50X},
+		  'Target % > 100x'	    =>  $data->{hs_metrics}{summary}{PCT_TARGET_BASES_100X},
+		  'Q20 Bases %'		    =>  $pct_q20_bases,
+		  '% HQ Aligned Reads'	    =>  $pct_hq_reads,
+	);
+
+    print $json->pretty->encode( \%report );
+}
+
+
