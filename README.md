@@ -26,6 +26,7 @@ Improvement of the SV/CNV calling approach is linked to the JIRA epic [FE3-2205]
 **Other files**
 * Tandem Repeat Finder executable: "https://github.com/Benson-Genomics-Lab/TRF/releases/tag/v4.09.1"  
 * Adotto TR Catalog: "https://github.com/ACEnglish/adotto/blob/main/regions/DataDescription.md"  
+* Sentieon DNAscope bundles: "https://github.com/Sentieon/sentieon-models?tab=readme-ov-file" 
 
 ## Description of Files. 
 * modules/

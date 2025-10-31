@@ -18,6 +18,7 @@ params.bwa_model = null
 params.cnv_model = null
 params.dnascope_bundle = null
 params.sentieon_illumina_wgs_bundle = null
+params.sentieon_illumina_wes_bundle = null
 params.wes = false
 params.pcr_free = null
 params.reference_fasta = null
@@ -119,10 +120,10 @@ workflow {
 
         //target bed file channel
         target_bed_ch = Channel.fromPath(params.target_bed, checkIfExists: true)
-        sentieon_bundle_ch = Channel.value(params.sentieon_illumina_wgs_bundle)
+        sentieon_bundle_ch = Channel.value(params.sentieon_illumina_wes_bundle)
 
         // Map FASTQ files to BAM
-        bwa_mem_out = BWA_MEM(input_fastqs.map { [it.id, it.fastq1, it.fastq2] } , dnascope_bundle_ch, reference_fasta_ch )
+        bwa_mem_out = BWA_MEM(input_fastqs.map { [it.id, it.fastq1, it.fastq2] } , sentieon_bundle_ch, reference_fasta_ch )
         bwa_mem_out.sorted_bam.view()
         
         metrics_out = METRICS_WES(bwa_mem_out.sorted_bam, reference_fasta_ch, target_bed_ch, dest_prefix_ch)
@@ -131,7 +132,7 @@ workflow {
         dedup_out = DEDUP(bwa_mem_out.sorted_bam, dest_prefix_ch)
 
         // DNAscope WES
-        dnascope_wes_out = DNASCOPE_WES(dedup_out.deduped_bam, dnascope_bundle_ch, reference_fasta_ch, target_bed_ch)
+        dnascope_wes_out = DNASCOPE_WES(dedup_out.deduped_bam, sentieon_bundle_ch, reference_fasta_ch, target_bed_ch)
 
         // CNV Calling WES
         cnv_wes_out = CNV_CALLING_WES(dedup_out.deduped_bam, sentieon_bundle_ch, reference_fasta_ch, target_bed_ch)
