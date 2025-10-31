@@ -46,6 +46,7 @@ include { ADD_TRF } from './modules/trf_anno.nf'
 include { DELLY_SV } from './modules/delly_sv.nf'
 include { DELLY_CNV } from './modules/delly_cnv.nf'
 include { JASMINE_CNV } from './modules/jasmine_cnv.nf'
+include { GANGSTR } from './modules/gangstr.nf'
 include { CNV_PROCESSING } from './modules/cnv_processing.nf'
 include { CNV_CALLING_WES } from './modules/cnv_calling_wes.nf'
 include { CONCAT1 } from './modules/concat_sv_snv.nf'
@@ -122,6 +123,10 @@ workflow {
     def fasta_indexes = index_exts.collect { ext -> file("${params.reference_fasta}.${ext}") }
     reference_fasta_ch = Channel.value( tuple(file(params.reference_fasta), fasta_indexes) )
 
+    // STR BED file 
+    gangstr_bed_ch = Channel.fromPath('resources/hg38_ver13.bed', checkIfExists: true)
+
+    // Run pipeline based on WES or WGS input data
     if (params.wes) {
         println "Running pipeline for WES input."
 
@@ -139,6 +144,7 @@ workflow {
         bwa_mem_out = BWA_MEM(input_fastqs.map { [it.id, it.fastq1, it.fastq2] } , wes_dnascope_bundle_ch, reference_fasta_ch )
         bwa_mem_out.sorted_bam.view()
         
+        // WES Metrics
         metrics_out = METRICS_WES(bwa_mem_out.sorted_bam, reference_fasta_ch, target_bed_ch, dest_prefix_ch)
 
         // Remove duplicates
@@ -190,6 +196,9 @@ workflow {
         pangenie_out = PANGENIE(pangenie_ref_ch, input_fastqs.map { [it.id, it.fastq1, it.fastq2] })
         pangenie_processing_out = PROCESS_PANGENIE(pangenie_py_ch, pangenie_out.pangenie_gt_calls)
 
+        // Call STRs with GangSTR
+        str_calls = GANGSTR(dedup_out.deduped_bam, reference_fasta_ch, gangstr_bed_ch)
+        
         // Combine SNV/INDEL VCF and SV VCF for STR/VNTR annotation
         concat_sv_smallvar = CONCAT1(pangenie_processing_out.filtered_SVs, dnascope_out.dnascope_vcf)
 
