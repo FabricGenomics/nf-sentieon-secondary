@@ -78,6 +78,7 @@ nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
 --proband_fastq1 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_1.fq.gz \
 --proband_fastq2 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_2.fq.gz \
 --platform ("CG", "MGI", "Element", or "Illumina") \
+--target_bed /home/ec2-user/haffener_test_dir/GRCh38_protein_coding.bed \
 -c /home/ec2-user/haffener_test_dir/sentieon_wgs/nextflow.local.config \
 --wes true -params-file /home/ec2-user/haffener_test_dir/sentieon_wgs/nf_config.yaml
 ```
