@@ -1,7 +1,7 @@
-# feature/sentieon_wgs_sv_ref_vcf 
+# feature/wes_update
 
 ## Concept 
-This pipeline is for calling SNVs, INDELs, CNVs, and SVs from short-read whole genome sequencing data. The Sentieon driver algorithms are used for calling SNVs and INDELs. We use a combination of PanGenie, manta, and delly for calling SVs. PanGenie was found to increase recall to ~91% from 15%-30% depending on the caller, but PanGenie only genotypes SVs present in the PanGenome. To include unknown SVs, we call SVs with manta in high sensitivity mode and with delly, then merge with PanGenie calls using Jasmine. Calls absent from PanGenie but called by both manta and delly are extracted, subset to just Delly genotypes, and then concatenated with the PanGenie calls. For CNVs, delly SV + delly CNV callers are used. For STRs, the PanGenie+SentieonDNAscope calls are annotated with `truvari anno trf` which uses Tandem Repeat Finder to annotate tandem repeats in the variant calls. The manta+delly SV calls are not annotated with `truvari anno trf` because they do not produce sequences for insertions/duplications and deletions. 
+The updated Secondary Analysis pipeline can handle WGS or WES data. For both WGS and WES, the Sentieon driver algorithms are used for calling SNVs and INDELs. For WGS, we use a PanGenome approach that utilizes PanGenie to genotype SVs that are present in a PanGenome containing 88 haplotypes. PanGenie was found to increase recall to ~91% from 15%-30% depending on the caller. For CNVs, delly SV + delly CNV callers are used. For STRs, the PanGenie+SentieonDNAscope calls are annotated with `truvari anno trf` which uses Tandem Repeat Finder to annotate tandem repeats in the variant calls. For WES, we do not call SVs. CNVs are called with Sentieon's CNVscope algorithm, but it is recommended to use WGS for CNVs if possible. 
 
 Improvement of the SV/CNV calling approach is linked to the JIRA epic [FE3-2205](https://spiralgenetics.atlassian.net/browse/FE3-2205). 
 
@@ -36,23 +36,21 @@ Improvement of the SV/CNV calling approach is linked to the JIRA epic [FE3-2205]
     - delly_cnv.nf calls CNVs with Delly and uses Delly SV calls to refine breakpoints 
     - delly_sv.nf calls SVs with Delly to be used in CNV calling and merged with Manta and Pangenie SV calls 
     - dnascope.nf calls sentieon for SNV/INDEL calling 
-    - filter_jasmine_sv_merge.nf identifies SV calls in the merged PanGenie+Manta+Delly VCF that are absent in PanGenie but called by Manta and Delly  
     - jasmine_cnv.nf merges Delly CNV and Delly SV calls to obtain DEL/DUP information 
-    - jasmine_sv_merge.nf merges manta, delly, and PanGenie SV calls  
-    - manta.nf calls SVs with manta in high sensitivity mode 
     - metrics.nf outputs the expected metrics tarball and JSON files expected by the API 
     - remove_dup.nf marksand removes duplicate reads 
     - pangenie.nf calls pangenie to genotype SVs against the pangenome 
     - pangenie_processing.nf converts the SV VCF to a biallelic format and adds SV LENGTH, SV TYPE, and END fields to INFO. 
-    - trf_anno.nf runs is the nextflow process that runs `truvari anno trf` to find and annotate tandem repeats  
+    - trf_anno.nf runs is the nextflow process that runs `truvari anno trf` to find and annotate tandem repeats 
+    - cnv_calling_wes.nf is the nextflow process that calls CNVs for WES data  
+    - dnascope_wes.nf is the nextflow process that calls SNVs/INDELs for WES data  
+    - metrics_wes.nf calculates metrics for WES data including HS metrics  
 * bin/ 
     - cnv_vcf_update.py is a python script to add copy number info to the INFO field and update the SVTYPE to DEL or DUP for CNV calls 
     - sv_info_field.py is a custom python script to add common SV annotations to the VCF output by pangenie and is called by nextflow 
     - extract_trf.py subsets the tandem repeat annotated VCF to only variants with tandem repeats identified  
     - filter_vcf_samps.py is used in filter_jasmine.nf to identify variants absent from the PanGenome and called by manta and delly  
-* main.nf is the main nextflow script that is called to run the pipeline 
-* resources/
-    - missing_header_lines.txt is a text file containing VCF header lines needed to merge the different SV calls successfully 
+* main.nf is the main nextflow script that is called to run the pipeline  
 * docker_files/ contains the 5 dockerfiles needed to build the images used in the pipeline
 * nextflow.config contains information for the different profiles; main configuration file for pipeline
 * nextflow.local.config user-specific customization (?)
@@ -61,7 +59,7 @@ Improvement of the SV/CNV calling approach is linked to the JIRA epic [FE3-2205]
 ### How to Run  
 The nextflow pipeline expects as input a set of compressed, paired-end fastq files, the `nf_config.yaml` and `nextflow.local.config` files. It will output a single, concatenated VCF containing SNVs+INDELs called with Sentieon, CNVs called with Delly, SVs called with PanGenie, Manta, and Delly, and tandem repeat annotations output from Truvari. It also outputs a tarball containing the metrics files and the sorted BAM file with duplicates marked. The s3 bucket path is defined in `nf_config.yaml`
 
-Below is a code block with an example for running the nextflow pipeline. 
+Below is a code block with an example for running the nextflow pipeline for WGS data. This is the default pipeline. 
 
 ```
 nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
@@ -71,5 +69,34 @@ nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
 -params-file /home/ec2-user/haffener_test_dir/sentieon_wgs/nf_config.yaml
 ```
 
+The pipeline can also do secondary analysis for WES data by specifying the `--wes true` flag.  
+
+```
+nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
+--proband_fastq1 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_1.fq.gz \
+--proband_fastq2 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_2.fq.gz \
+-c /home/ec2-user/haffener_test_dir/sentieon_wgs/nextflow.local.config \
+--wes true -params-file /home/ec2-user/haffener_test_dir/sentieon_wgs/nf_config.yaml
+```
+
 ## Other Considerations
 Regardless of the reference genome file specified in the params file, PanGenie calls against the GCA_000001405.15_GRCh38_no_alt_plus_hs38d1_analysis_set reference as it was used to generate the index files for PanGenie. 
+For CNV calling with WES data, Sentieon states a limitation of the algorithm is that it was trained on diploid WGS samples. It is therefore recommended that with male samples, autosomes and sex chromosomes are called separately. See their example below:
+
+```
+ sentieon driver --interval AUTOSOMES_BED -t NUMBER_THREADS \
+   -r REFERENCE -i DEDUPED_BAM --algo CNVscope \
+   --model ML_MODEL/cnv.model TMP_DIPLOID_VCF
+
+ sentieon driver --interval  -t NUMBER_THREADS \
+   -r REFERENCE --algo CNVModelApply --model ML_MODEL/cnv.model \
+   -v TMP_DIPLOID_VCF DIPLOID_VCF
+
+sentieon driver --interval HAPLOID_BED -t NUMBER_THREADS \
+   -r REFERENCE -i DEDUPED_BAM --algo CNVscope \
+   --model ML_MODEL/cnv.model TMP_HAPLOID_VCF
+
+ sentieon driver --interval  -t NUMBER_THREADS \
+   -r REFERENCE --algo CNVModelApply --model ML_MODEL/cnv.model \
+   -v TMP_HAPLOID_VCF HAPLOID_VCF
+```

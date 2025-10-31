@@ -2,7 +2,7 @@
 
 
 // Process: Generate metrics
-process METRICS {
+process METRICS_WES {
     tag "metrics.${sample_id}"
     publishDir "${dest_prefix}/${sample_id}", mode: 'copy'
 

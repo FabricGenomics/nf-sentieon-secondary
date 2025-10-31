@@ -15,17 +15,9 @@ process PROCESS_PANGENIE {
     tuple val (sample_id), path(input_vcf)
 
     output:
-    tuple val(sample_id), path("${sample_id}_pangenie_jasmine_input.vcf"), emit: pangenie_input_jasmine
-    //tuple path("${sample_id}_pangenie_future_merge.vcf.gz"), path("${sample_id}_pangenie_future_merge.vcf.gz.tbi"), emit: pangenie_final_merge
-    script:
-    /*
-    # Sort, filter and compress all Pangenie calls for truvari
-    bcftools view -i '(GT != "RR" && GT != "mis")' \
-    -Oz -o ${sample_id}_pangenie_future_merge.vcf.gz \
-    ${sample_id}_result_SV_genotyping_biallelic_SVinfo_sorted.vcf.gz
+    tuple val(sample_id), path("${sample_id}_pangenie_filtered_SVs.vcf.gz"), path("${sample_id}_pangenie_filtered_SVs.vcf.gz.tbi"), emit: filtered_SVs
 
-    tabix ${sample_id}_pangenie_future_merge.vcf.gz
-    */
+    script:
     """
     # Create biallelic VCF output from pangenie - script inside pangenie build in container
     cat $input_vcf |\
@@ -45,10 +37,12 @@ process PROCESS_PANGENIE {
 
     tabix ${sample_id}_result_SV_genotyping_biallelic_SVinfo_sorted.vcf.gz
 
-    # Filter for jasmine input
+    # Filter out missing or homozygous reference SV calls, set minimum size to 40bp
     bcftools view -i '(SVLEN < -49 || SVLEN > 49) && (GT != "RR" && GT != "mis")' \
-    -Ov -o ${sample_id}_pangenie_jasmine_input.vcf \
+    -Oz -o ${sample_id}_pangenie_filtered_SVs.vcf.gz \
     ${sample_id}_result_SV_genotyping_biallelic_SVinfo_sorted.vcf.gz
+
+    tabix ${sample_id}_pangenie_filtered_SVs.vcf.gz 
 
     # rm intermediate files
     rm ${sample_id}_result_SV_genotyping_biallelic.vcf 
