@@ -13,18 +13,22 @@ params.father_fastq2 = null
 params.s3_bucket_out = params.s3_bucket_out
     ? params.s3_bucket_out.replaceAll(/\/+$/, '')
     : null
+params.wes = false
+params.platform = null
+// Config file parameters
 params.dnascope_model = null
 params.bwa_model = null
 params.cnv_model = null
-params.dnascope_bundle = null
+params.sentieon_complete_mgi_wgs_bundle = null
+params.sentieon_complete_mgi_wes_bundle = null
+params.sentieon_element_wgs_bundle = null
+params.sentieon_element_wes_bundle = null
 params.sentieon_illumina_wgs_bundle = null
 params.sentieon_illumina_wes_bundle = null
-params.wes = false
 params.pcr_free = null
 params.reference_fasta = null
 params.sentieon_dir = null
 params.samtools_dir = null
-params.platform = null
 params.pangenome_data_dir = null
 params.pangenome_data_prefix = null
 params.biallelic_vcf = null
@@ -57,12 +61,11 @@ workflow {
         error "Error: Secondary S3 Bucket (--s3_bucket_out) is required."
     }
     if (!params.reference_fasta) { error "Error: Please specify reference fasta with --reference_fasta" }
-    if (!params.dnascope_model) { error "Error: Please specify dnascope model with --dnascope_model" }
     if (!params.bwa_model) { error "Error: Please specify bwa model with --bwa_model" }
     if (!params.sentieon_dir) { error "Error: Please specify sentieon dir with --sentieon_dir" }
     if (!params.samtools_dir) { error "Error: Please specify samtools dir with --samtools_dir" }
     if (!params.pcr_free) { error "Error: Please specify pcr free with --pcr_free true / false" }
-    if (!params.platform) { error "Error: Please specify platform with --platform" }
+    if (!params.platform) { error "Error: Sequencing platform is required. Please specify platform with --platform" }
 
     log.info "Workflow session ID: ${workflow.sessionId}"
 
@@ -101,7 +104,18 @@ workflow {
     }
 
     // Bundle inputs
-    dnascope_bundle_ch = Channel.value(params.dnascope_bundle)
+    if (params.platform == "CG" || params.platform == "MGI") {
+        dnascope_bundle_ch = Channel.value(params.sentieon_complete_mgi_wgs_bundle)
+        wes_dnascope_bundle_ch = Channel.value(params.sentieon_complete_mgi_wes_bundle)
+    } else if (params.platform == "Element") {
+        dnascope_bundle_ch = Channel.value(params.sentieon_element_wgs_bundle)
+        wes_dnascope_bundle_ch = Channel.value(params.sentieon_element_wes_bundle)
+    } else if (params.platform == "Illumina") {
+        dnascope_bundle_ch = Channel.value(params.sentieon_illumina_wgs_bundle)
+        wes_dnascope_bundle_ch = Channel.value(params.sentieon_illumina_wes_bundle)
+    } else {
+        error "Unknown Sequencing Platform Type: ${params.platform}"
+    }
 
     // FASTAs and indexes
     def index_exts = ['fai','amb','ann','bwt','pac','sa']
@@ -120,10 +134,9 @@ workflow {
 
         //target bed file channel
         target_bed_ch = Channel.fromPath(params.target_bed, checkIfExists: true)
-        sentieon_bundle_ch = Channel.value(params.sentieon_illumina_wes_bundle)
 
         // Map FASTQ files to BAM
-        bwa_mem_out = BWA_MEM(input_fastqs.map { [it.id, it.fastq1, it.fastq2] } , sentieon_bundle_ch, reference_fasta_ch )
+        bwa_mem_out = BWA_MEM(input_fastqs.map { [it.id, it.fastq1, it.fastq2] } , wes_dnascope_bundle_ch, reference_fasta_ch )
         bwa_mem_out.sorted_bam.view()
         
         metrics_out = METRICS_WES(bwa_mem_out.sorted_bam, reference_fasta_ch, target_bed_ch, dest_prefix_ch)
@@ -132,10 +145,10 @@ workflow {
         dedup_out = DEDUP(bwa_mem_out.sorted_bam, dest_prefix_ch)
 
         // DNAscope WES
-        dnascope_wes_out = DNASCOPE_WES(dedup_out.deduped_bam, sentieon_bundle_ch, reference_fasta_ch, target_bed_ch)
+        dnascope_wes_out = DNASCOPE_WES(dedup_out.deduped_bam, wes_dnascope_bundle_ch, reference_fasta_ch, target_bed_ch)
 
         // CNV Calling WES
-        cnv_wes_out = CNV_CALLING_WES(dedup_out.deduped_bam, sentieon_bundle_ch, reference_fasta_ch, target_bed_ch)
+        cnv_wes_out = CNV_CALLING_WES(dedup_out.deduped_bam, dnascope_bundle_ch, reference_fasta_ch, target_bed_ch)
 
         // Combine VCF
         concat_out_wes = CONCAT_FINAL(dnascope_wes_out.dnascope_vcf, cnv_wes_out.cnv_vcf, dest_prefix_ch)

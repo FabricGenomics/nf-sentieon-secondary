@@ -66,6 +66,7 @@ Below is a code block with an example for running the nextflow pipeline for WGS 
 nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
 --proband_fastq1 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_1.fq.gz \
 --proband_fastq2 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_2.fq.gz \
+--platform ("CG", "MGI", "Element", or "Illumina") \
 -c /home/ec2-user/haffener_test_dir/sentieon_wgs/nextflow.local.config \
 -params-file /home/ec2-user/haffener_test_dir/sentieon_wgs/nf_config.yaml
 ```
@@ -76,6 +77,7 @@ The pipeline can also do secondary analysis for WES data by specifying the `--we
 nextflow /home/ec2-user/haffener_test_dir/sentieon_wgs/main.nf \
 --proband_fastq1 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_1.fq.gz \
 --proband_fastq2 /home/ec2-user/gencell_debug/V350204537_L03_13_433316_2.fq.gz \
+--platform ("CG", "MGI", "Element", or "Illumina") \
 -c /home/ec2-user/haffener_test_dir/sentieon_wgs/nextflow.local.config \
 --wes true -params-file /home/ec2-user/haffener_test_dir/sentieon_wgs/nf_config.yaml
 ```

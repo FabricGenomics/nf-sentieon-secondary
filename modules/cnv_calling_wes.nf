@@ -3,7 +3,7 @@
 
 process CNV_CALLING_WES {
     tag "cnv_calling.${sample_id}"
-    publishDir "${params.output_dir}/${sample_id}/variants", mode: 'copy'
+    //publishDir "${params.output_dir}/${sample_id}/variants", mode: 'copy'
 
     cpus 2
     memory '8GB'
@@ -15,7 +15,7 @@ process CNV_CALLING_WES {
     path target_bed
 
     output:
-    tuple val(sample_id), path("${sample_id}_CNV.vcf.gz"), path("${sample_id}_CNV.vcf.gz"), emit: cnv_vcf
+    tuple val(sample_id), path("${sample_id}_CNV.vcf.gz"), path("${sample_id}_CNV.vcf.gz.tbi"), emit: cnv_vcf
 
     script:
     """
